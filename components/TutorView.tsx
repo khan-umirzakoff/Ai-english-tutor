@@ -133,17 +133,9 @@ const TutorView: React.FC<TutorViewProps> = ({ lesson, languages, onLessonComple
   // Auto-scroll for Immersive Mode - Center Focus
   useEffect(() => {
       if (viewMode === 'immersive' && immersiveScrollRef.current && activeRealWordIndex >= 0) {
-          // Find the span corresponding to the current active word
-          // We need to know which index in the parts array corresponds to this real word index
-          // Since we don't have direct mapping here easily without re-looping, we rely on the ID set in render
-          
-          // Simple heuristic: Try to scroll to the approximate end if tracking live
           const activeElement = document.getElementById(`word-${activeRealWordIndex}`);
           if (activeElement) {
               activeElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          } else {
-              // Fallback to bottom if just starting or element not found
-              // immersiveScrollRef.current.scrollTo({ top: immersiveScrollRef.current.scrollHeight, behavior: 'smooth' });
           }
       }
   }, [activeRealWordIndex, viewMode]);
@@ -187,7 +179,7 @@ const TutorView: React.FC<TutorViewProps> = ({ lesson, languages, onLessonComple
       : `\n**CURRENT CONVERSATION HISTORY:**\n${conversationHistoryRef.current.map(m => `${m.speaker === 'ai' ? 'Tutor' : 'User'}: ${m.text}`).join('\n')}`;
 
 
-    // UPDATED PROMPT: Stricter instructions moved to the top
+    // UPDATED PROMPT: Stricter instructions moved to the top + VISION CAPABILITIES
     const systemInstruction = `You are a strict, professional language tutor ('ustoz') teaching a ${languages.native} speaker to learn ${languages.target}.
 
 **CRITICAL RULES (MUST FOLLOW):**
@@ -196,6 +188,7 @@ const TutorView: React.FC<TutorViewProps> = ({ lesson, languages, onLessonComple
 3.  **SHORT & CLEAR**: Keep your responses concise. Focus on the lesson tasks.
 4.  **USE ${languages.native} FOR EXPLANATIONS**: Explain complex concepts in ${languages.native}, but encourage the user to speak in ${languages.target}.
 5.  **NO INTERNAL THOUGHTS**: Output ONLY what you want to say to the student. Do not output thinking processes.
+6.  **VISION CAPABILITIES**: You can see images the user sends. If they send an image of a book or text, read it and help them. Use the image as context for the lesson.
 
 **YOUR LESSON PLAN:**
 ${lessonPlanDetails}
@@ -387,12 +380,18 @@ When completed, end your response (in ${languages.native}) with "LESSON_COMPLETE
             if (!isRecordingRef.current) return;
 
             if (isButtonHeldRef.current) {
+                // ACTIVE NOISE FLOOR INJECTION
+                if (rms < SILENCE_THRESHOLD) {
+                    for (let i = 0; i < inputData.length; i++) {
+                        inputData[i] = (Math.random() * 2 - 1) * 0.001; 
+                    }
+                }
                 silenceStartTimeRef.current = null;
             } else {
                 if (rms < SILENCE_THRESHOLD) {
                     if (silenceStartTimeRef.current === null) {
                         silenceStartTimeRef.current = Date.now();
-                    } else if (Date.now() - silenceStartTimeRef.current > 1000) { // Back to 1s tail logic for safety
+                    } else if (Date.now() - silenceStartTimeRef.current > 1000) { 
                          console.log("Smart VAD: Silence detected, stopping early.");
                          stopRecordingNow();
                          return;
@@ -454,11 +453,6 @@ When completed, end your response (in ${languages.native}) with "LESSON_COMPLETE
     
     setIsProcessing(false); 
     
-    // In immersive mode, we generally keep the text flowing, but you could clear here if desired
-    // setTranscriptParts([]);
-    // setActiveRealWordIndex(-1);
-    // wordQueueRef.current = [];
-    
     isNewUserUtteranceRef.current = true;
     isRecordingRef.current = true; 
     isButtonHeldRef.current = true; 
@@ -496,8 +490,11 @@ When completed, end your response (in ${languages.native}) with "LESSON_COMPLETE
 
   const handleSend = async () => {
     if (!sessionPromiseRef.current) return;
-    if (!textInput.trim() && !selectedImage) return;
+    
+    // STRICT RULE: Text is mandatory, even if image is selected.
+    if (!textInput.trim()) return;
 
+    const session = await sessionPromiseRef.current;
     let attachmentData = undefined;
 
     if (selectedImage) {
@@ -510,21 +507,18 @@ When completed, end your response (in ${languages.native}) with "LESSON_COMPLETE
             mimeType: mimeType
         };
 
-        sessionPromiseRef.current.then((session: any) => {
-            session.sendRealtimeInput({ 
-                media: { 
-                    mimeType: mimeType, 
-                    data: base64Image 
-                } 
-            });
+        // SEQUENTIAL SEND: Image First
+        await session.sendRealtimeInput({ 
+            media: { 
+                mimeType: mimeType, 
+                data: base64Image 
+            } 
         });
     }
 
-    if (textInput.trim()) {
-         sessionPromiseRef.current.then((session: any) => {
-            session.sendRealtimeInput({ text: textInput });
-        });
-    }
+    // SEQUENTIAL SEND: Text Immediately After
+    // This ensures the model receives both parts effectively in the correct order
+    await session.sendRealtimeInput({ text: textInput });
 
     addMessage('user', textInput, attachmentData);
     
@@ -841,7 +835,7 @@ When completed, end your response (in ${languages.native}) with "LESSON_COMPLETE
                                 e.target.style.height = Math.min(e.target.scrollHeight, 100) + 'px';
                             }}
                             onBlur={() => setTimeout(handleCloseTextMode, 100)}
-                            placeholder={selectedImage ? "Rasmga izoh..." : "Xabar yozish..."}
+                            placeholder={selectedImage ? "Rasmga izoh yozing (majburiy)..." : "Xabar yozish..."}
                             className="flex-1 bg-slate-800/50 text-white placeholder-slate-500 focus:outline-none resize-none py-3.5 px-5 rounded-2xl border border-slate-700 focus:border-indigo-500/50 max-h-24 text-[16px]"
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -855,8 +849,8 @@ When completed, end your response (in ${languages.native}) with "LESSON_COMPLETE
                         <button 
                             onClick={handleSend}
                             onMouseDown={(e) => e.preventDefault()}
-                            className="p-3.5 rounded-full bg-indigo-600 text-white shadow-lg disabled:opacity-50"
-                            disabled={!textInput.trim() && !selectedImage}
+                            className="p-3.5 rounded-full bg-indigo-600 text-white shadow-lg disabled:opacity-50 disabled:bg-slate-700"
+                            disabled={!textInput.trim()}
                         >
                             <SendIcon className="w-5 h-5" />
                         </button>

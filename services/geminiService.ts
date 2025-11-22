@@ -1,3 +1,4 @@
+
 import { GoogleGenAI, Type } from "@google/genai";
 import type { Lesson, LearningHistory, LearningPath, Conversation, LanguagePair } from '../types';
 
@@ -119,26 +120,4 @@ export const generateLessonPlan = async (learningPath: LearningPath, history: Le
       vocabulary: [{ word: 'Hello', translation: 'Salom' }]
     }];
   }
-};
-
-export const analyzeImage = async (base64Image: string, mimeType: string, prompt: string): Promise<string> => {
-    const ai = getAi();
-    const imagePart = {
-        inlineData: {
-            data: base64Image,
-            mimeType: mimeType,
-        },
-    };
-    const textPart = { text: prompt };
-
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-flash-latest',
-            contents: { parts: [imagePart, textPart] },
-        });
-        return response.text;
-    } catch (error) {
-        console.error("Error analyzing image:", error);
-        return "Sorry, I couldn't analyze the image right now.";
-    }
 };
